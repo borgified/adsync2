@@ -21,6 +21,20 @@ open(my $data, '<:encoding(utf8)', $file) or die "couldnt open file $!\n";
 my %employees;
 my @header;
 
+#mappings CSV:AD
+
+#Employee Name:name
+#Employee Id:none
+#Job title:title
+#Business Unit:company
+#Home Department:department.description
+#Location:c-st-physicalDeliveryOfficeName
+#Work Phone:telephoneNumber
+#Work Fax:facsimileTelephoneNumber
+#Work Email:mail
+#Manager:manager
+
+
 while(my $fields = $csv->getline($data)){
 
 	#detect if the first field starts with 'Employee Name' if so, then this is
