@@ -6,6 +6,7 @@ use Text::CSV;
 use Data::Dumper;
 use DBI;
 use Net::LDAPS;
+use Locale::Country;
 
 my $file = $ARGV[0] or die "need csv input file\n";
 
@@ -39,7 +40,7 @@ my @header;
 
 #mappings CSV:AD
 
-#Employee Name:name
+#Employee Name:displayname
 #Employee Id:none
 #Job title:title
 #Business Unit:company
@@ -114,7 +115,7 @@ my $query = $dbh->prepare("select * from ldap where mail = ?");
 
 foreach my $email (keys(%employees)){
 	my $rv=$query->execute($email);
-	my($dn,$title,$department,$description,$mail,$sam,$givenName,$sn,$name,$company,$c,$st,$physicalDeliveryOfficeName,$telephoneNumber,$facsimileTelephoneNumber,$manager) = $query->fetchrow_array;
+	my($dn,$title,$department,$description,$mail,$sam,$givenName,$sn,$displayname,$company,$c,$st,$physicalDeliveryOfficeName,$telephoneNumber,$facsimileTelephoneNumber,$manager,$l) = $query->fetchrow_array;
 	if($rv != 1){
 		print "\ndid not find $mail\n\n";
 
@@ -150,7 +151,7 @@ foreach my $email (keys(%employees)){
 	}else{
 		#using email, we matched an account! compare remaining fields
 
-		print ">>>>$rv $email\n";
+		print ">>>>$rv $email $dn\n";
 
 		$employees{$email}{"Home Department"} =~ /(.*)\.(.*)/;
 		my $dept = $1;
@@ -165,24 +166,33 @@ foreach my $email (keys(%employees)){
 		}
 
 		my $country;
-		my $state_or_foreign_city;
+		my $city="";
+		my $state="";
 		my $office_name;
 
 		if($count == 1){
 			$employees{$email}{"Location"} =~ /(.*)-(.*)/;
 			$country = $1;
-			$state_or_foreign_city = $2;
-			$office_name=$state_or_foreign_city;
+			$city = $2;
+			$office_name=$city;
 
 		}elsif($count == 2){
 			$employees{$email}{"Location"} =~ /(.*)-(.*)-(.*)/;
 			$country = $1;
-			$state_or_foreign_city = $2;
+			$state = $2;
 			$office_name = $3;
 		}else{
 			print "Location field in CSV does not conform to known standard. Investigate IRPT before continuing.\n";
 			exit;
 		}
+
+			#if countrys are not in their 2 letter country code, convert it into one
+			if($country !~ /\b\w\w\b/){
+				$country=uc(country2code($country));
+			}elsif($country eq 'UK'){
+					$country = "GB";
+			}
+
 
 		#translate the manager's field to his name rather than show dn (too long)
 		if($manager ne 'none'){
@@ -193,11 +203,15 @@ foreach my $email (keys(%employees)){
 		#make sure that CSV's manager field resolves to a dn
 		if($employees{$email}{"Manager"} ne ''){
 			$newmanager = $n2d{$employees{$email}{"Manager"}};
+			if(!defined($newmanager)){
+				print "i have trouble resolving manager: $employees{$email}{'Manager'} please fix in CSV.\n";
+				exit;
+			}
 		}
 
 		printf " %40s | %40s | %40s \n", "","AD", "CSV";
 		print "-"x120,"-------","\n";
-		printf " %40s | %40s | %40s \n", "Employee Name", $name, $employees{$email}{"Employee Name"};
+		printf " %40s | %40s | %40s \n", "Employee Name", $displayname, $employees{$email}{"Employee Name"};
 		printf " %40s | %40s | %40s \n", "Job title",$title, $employees{$email}{"Job title"};
 		printf " %40s | %40s | %40s \n", "Business Unit",$company,$employees{$email}{"Business Unit"};
 		print "-"x120,"-------","\n";
@@ -207,7 +221,8 @@ foreach my $email (keys(%employees)){
 		print "-"x120,"-------","\n";
 		printf " %40s | %40s | %40s \n", "Location","",$employees{$email}{"Location"};
 		printf " %40s | %40s | %40s \n", "c",$c, $country;
-		printf " %40s | %40s | %40s \n", "st",$st, $state_or_foreign_city;
+		printf " %40s | %40s | %40s \n", "st",$st, $state;
+		printf " %40s | %40s | %40s \n", "l",$l, $city;
 		printf " %40s | %40s | %40s \n", "physicalDeliveryOfficeName",$physicalDeliveryOfficeName,$office_name;
 		print "-"x120,"-------","\n";
 		printf " %40s | %40s | %40s \n", "Work Phone",$telephoneNumber,$employees{$email}{"Work Phone"};
@@ -224,19 +239,41 @@ foreach my $email (keys(%employees)){
 
 			my $result=$ldap->modify($dn,
 				replace => {
-					name => $employees{$email}{"Employee Name"},
+					displayname => $employees{$email}{"Employee Name"},
 					title => $employees{$email}{"Job title"},
 					company => $employees{$email}{"Business Unit"},
 					department => $dept,
 					description => $desc,
 					c => $country,
-					st => $state_or_foreign_city,
 					physicalDeliveryOfficeName => $office_name,
 					manager => $newmanager,
 				}
 			);
 			print $result->error,"\n";
 			$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
+
+
+			#if state is defined, update it
+			if($state ne ''){
+				my $result=$ldap->modify($dn,
+					replace => {
+						st => $state,
+					}
+				);
+				print $result->error,"\n";
+				$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
+			}
+
+			#if city is defined, update it
+			if($city ne ''){
+				my $result=$ldap->modify($dn,
+					replace => {
+						l => $city,
+					}
+				);
+				print $result->error,"\n";
+				$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
+			}
 
 
 			#update phone only if we have that info in CSV and nothing in AD
@@ -313,3 +350,4 @@ foreach my $email (keys(%employees)){
 	}
 }
 
+$ldap->unbind;
