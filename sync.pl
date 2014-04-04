@@ -40,7 +40,8 @@ my @header;
 
 #mappings CSV:AD
 
-#Employee Name:displayname
+#Employee Name:name
+#Preferred Name: displayName (not yet implemented)
 #Employee Id:none
 #Job title:title
 #Business Unit:company
@@ -213,7 +214,8 @@ foreach my $email (keys(%employees)){
 
 		printf " %40s | %40s | %40s \n", "","AD", "CSV";
 		print "-"x120,"-------","\n";
-		printf " %40s | %40s | %40s \n", "Employee Name", $displayname, $employees{$email}{"Employee Name"};
+		printf " %40s | %40s | %40s \n", "displayName:preferred name (niy)", $displayname, $employees{$email}{"Employee Name"};
+		printf " %40s | %40s | %40s \n", "Employee Name", $name, $employees{$email}{"Employee Name"};
 		printf " %40s | %40s | %40s \n", "Job title",$title, $employees{$email}{"Job title"};
 		printf " %40s | %40s | %40s \n", "Business Unit",$company,$employees{$email}{"Business Unit"};
 		print "-"x120,"-------","\n";
