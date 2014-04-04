@@ -105,19 +105,21 @@ my %n2d;
 
 while(my @row = $q2->fetchrow_array){
 	#print "$row[0] $row[8]\n";
-	$d2n{$row[0]}="$row[8]";
-	$n2d{$row[8]}=$row[0];
+	#row[0] contains the DN
+	#row[] contains their name (not displayName aka "preferred name")
+	my $lcname=lc($row[18]);
+	$d2n{$row[0]}="$lcname";
+	$n2d{"$lcname"}=$row[0];
 }
-
 
 
 my $query = $dbh->prepare("select * from ldap where mail = ?");
 
 foreach my $email (keys(%employees)){
 	my $rv=$query->execute($email);
-	my($dn,$title,$department,$description,$mail,$sam,$givenName,$sn,$displayname,$company,$c,$st,$physicalDeliveryOfficeName,$telephoneNumber,$facsimileTelephoneNumber,$manager,$l) = $query->fetchrow_array;
+	my($dn,$title,$department,$description,$mail,$sam,$givenName,$sn,$displayname,$company,$c,$st,$physicalDeliveryOfficeName,$telephoneNumber,$facsimileTelephoneNumber,$manager,$l,$upn,$name) = $query->fetchrow_array;
 	if($rv != 1){
-		print "\ndid not find $mail\n\n";
+		print "\nI failed to find $email by their email in AD, I will try again by extracting the first name and last name components from $email and repeating the search using first name (givenName) and last name (sn)\u\n";
 
 		#extract givenname and sn from email
 		$email=~/(.*)\.(.*)\@/;
@@ -202,7 +204,7 @@ foreach my $email (keys(%employees)){
 		my $newmanager;
 		#make sure that CSV's manager field resolves to a dn
 		if($employees{$email}{"Manager"} ne ''){
-			$newmanager = $n2d{$employees{$email}{"Manager"}};
+			$newmanager = $n2d{lc($employees{$email}{"Manager"})};
 			if(!defined($newmanager)){
 				print "i have trouble resolving manager: $employees{$email}{'Manager'} please fix in CSV.\n";
 				exit;
@@ -228,10 +230,12 @@ foreach my $email (keys(%employees)){
 		printf " %40s | %40s | %40s \n", "Work Phone",$telephoneNumber,$employees{$email}{"Work Phone"};
 		printf " %40s | %40s | %40s \n", "Work Fax",$facsimileTelephoneNumber,$employees{$email}{"Work Fax"};
 		printf " %40s | %40s | %40s \n", "Work Email",$email,$employees{$email}{"Work Email"};
-		printf " %40s | %40s | %40s \n", "Manager",$manager,$employees{$email}{"Manager"};
+		printf " %40s | %40s | %40s \n", "Manager (in lowercase)",lc($manager),lc($employees{$email}{"Manager"});
+		print "-"x120,"-------","\n";
 
 		print "\nupdate? (y/n) ";
 		my $input="";
+#		my $input="y";
 		$input=<STDIN>;
 		chomp($input);
 		if(lc($input) eq 'y'){
