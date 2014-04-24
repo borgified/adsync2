@@ -40,17 +40,25 @@ my @header;
 
 #mappings CSV:AD
 
-#Employee Name:name
-#Preferred Name: displayName (not yet implemented)
-#Employee Id:none
-#Job title:title
-#Business Unit:company
-#Home Department:department.description
-#Location:c-st-physicalDeliveryOfficeName
-#Work Phone:telephoneNumber
-#Work Fax:facsimileTelephoneNumber
-#Work Email:mail
-#Manager:manager
+#First Name: givenName
+#Preferred Name: displayName
+#Last Name: sn
+#Employee Id: employeeID
+#Job title: title
+#Business Unit: company
+#Home Department: department.description
+#Location: c-st-physicalDeliveryOfficeName
+#Work Phone: telephoneNumber
+#Work Fax: facsimileTelephoneNumber
+#Work Email: mail
+#Manager ID: none but will be linked to manager
+#Mngr. FName: ignored
+#Mngr. MName: ignored
+#Mngr. LName: ignored
+
+
+
+
 
 
 while(my $fields = $csv->getline($data)){
