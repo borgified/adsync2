@@ -57,10 +57,6 @@ my @header;
 #Mngr. LName: ignored
 
 
-
-
-
-
 while(my $fields = $csv->getline($data)){
 
 	#detect if the first field starts with 'Employee Name' if so, then this is
