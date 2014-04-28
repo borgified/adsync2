@@ -6,6 +6,7 @@ use Data::Dumper;
 use strict;
 use warnings;
 
+
 my $file = $ARGV[0] or die "need csv input file\n";
 open(my $data, '<:encoding(utf8)', $file) or die "couldnt open file $!\n";
 
@@ -25,13 +26,14 @@ while(my $fields = $csv->getline($data)){
 	#our header we'll use it as the key for our hash.
 	my $x=0;
 
-	if(${$fields}[0] eq 'Employee Name'){
+	if(${$fields}[0] eq 'First Name'){
 		@header=@{$fields};
 		next;
 	}else{
 
 		foreach my $field (@{$fields}){
-			$employees{"${$fields}[1]"}{"$header[$x]"}="$field";
+			#${$fields}[3] is eeid
+			$employees{"${$fields}[3]"}{"$header[$x]"}="$field";
 			$x++;
 		}
 
@@ -49,18 +51,22 @@ my $dbh = DBI->connect("DBI:mysql:"
 	undef
 ) or die "something went wrong ($DBI::errstr)";
 
-my $clear_data = $dbh->prepare("truncate table employee_ids");
-$clear_data->execute or die "SQL Error: $DBI::errstr\n";
+my $clear_table = $dbh->prepare("truncate table employee_ids");
+$clear_table->execute or die "SQL Error: $DBI::errstr\n";
 
 
 my $query = $dbh->prepare("insert into employee_ids (eeid,email) values (?,?)");
 
+print "updating employee_ids table with values from $file\n";
+
 foreach my $eeid (keys %employees){
 	my $email = $employees{$eeid}{'Work Email'};
 	#validate employee id and actian email
-	if (($eeid =~ /^\d+$/) && ($email =~ /[\w\-]+\.[\w\-]+\@actian\.com/)){
+	if (($eeid =~ /^\d+a?$/) && ($email =~ /[\w\-]+\.[\w\-]+\@actian\.com/)){
 		$query->execute($eeid, $employees{$eeid}{'Work Email'}) or die "SQL Error: $DBI::errstr\n";
 	}else{
 		print "employee id ($eeid) or email ($email) problem\n";
+		exit;
 	}
 }
+
