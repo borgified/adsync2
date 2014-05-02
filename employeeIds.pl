@@ -51,22 +51,38 @@ my $dbh = DBI->connect("DBI:mysql:"
 	undef
 ) or die "something went wrong ($DBI::errstr)";
 
+
+#get a %hash{email}=dn so we can lookup and store dn info into the employee_ids table
+
+my %e2d;
+
+my $q=$dbh->prepare("select mail,dn from ldap");
+$q->execute;
+
+while(my($mail,$dn)=$q->fetchrow_array){
+	$e2d{lc($mail)}=$dn;
+}
+
+
 my $clear_table = $dbh->prepare("truncate table employee_ids");
 $clear_table->execute or die "SQL Error: $DBI::errstr\n";
 
 
-my $query = $dbh->prepare("insert into employee_ids (eeid,email) values (?,?)");
+my $query = $dbh->prepare("insert into employee_ids (eeid,email,dn) values (?,?,?)");
 
 print "updating employee_ids table with values from $file\n";
 
 foreach my $eeid (keys %employees){
-	my $email = $employees{$eeid}{'Work Email'};
+	my $email = lc($employees{$eeid}{'Work Email'});
 	#validate employee id and actian email
-	if (($eeid =~ /^\d+a?$/) && ($email =~ /[\w\-]+\.[\w\-]+\@actian\.com/)){
-		$query->execute($eeid, $employees{$eeid}{'Work Email'}) or die "SQL Error: $DBI::errstr\n";
+	if (($eeid =~ /^\d+a?$/) && ($email =~ /[\w\-]+\.[\w\-]+\@actian\.com/) && (exists($e2d{$email}))){
+		$query->execute($eeid, $email , $e2d{$email}) or die "SQL Error: $DBI::errstr\n";
 	}else{
-		print "employee id ($eeid) or email ($email) problem\n";
-		exit;
+		print "problem with employee id ($eeid) or email ($email) or e2d hash: $e2d{$email}\n";
+		print "this is usually an email problem, enter this person's actual email:\n";
+		my $email_answer = <STDIN>;
+		chomp($email_answer);
+		$query->execute($eeid, $email , $e2d{$email_answer}) or die "SQL Error: $DBI::errstr\nRe-run dumpad.pl and try again.\n";
 	}
 }
 
