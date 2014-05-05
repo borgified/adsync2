@@ -60,23 +60,23 @@ my @header;
 while(my $fields = $csv->getline($data)){
 
 	#detect if the first field starts with 'Employee Name' if so, then this is
-	#our header we'll use it as the key for our hash.
+	#our header
 	my $x=0;
 
-	if(${$fields}[0] eq 'Employee Name'){
+	if(${$fields}[0] eq 'First Name'){
 		@header=@{$fields};
 		next;
 	}else{
 
 		foreach my $field (@{$fields}){
-			$employees{"${$fields}[-2]"}{"$header[$x]"}="$field";
+			$employees{lc(${$fields}[-5])}{"$header[$x]"}="$field";
 			$x++;
 		}
 
 	}
 }
 
-#print Dumper(\%employees);exit;
+print Dumper(\%employees);exit;
 
 unless($csv->eof){
 	$csv->error_diag();
@@ -87,7 +87,7 @@ close($data);
 
 #now time to update AD
 
-#first find the employee by their email
+#first find the employee by their employee id
 #we're going to make use of the work we did in another script (dumpad.pl)
 #and query the database for info rather than going to AD directly.
 
@@ -100,21 +100,17 @@ my $dbh = DBI->connect("DBI:mysql:"
 	undef
 ) or die "something went wrong ($DBI::errstr)";
 
-#generate hashes to do name lookups by dn and vice versa. used for looking up managers mostly.
+#generate hashes to do email lookups by employee id and vice versa. used for looking up managers mostly.
 
-my $q2 = $dbh->prepare("select * from ldap");
+my $q2 = $dbh->prepare("select * from employee_ids");
 $q2->execute;
 
-my %d2n;
-my %n2d;
+my %email2eid;
+my %eid2email;
 
 while(my @row = $q2->fetchrow_array){
-	#print "$row[0] $row[8]\n";
-	#row[0] contains the DN
-	#row[] contains their name (not displayName aka "preferred name")
-	my $lcname=lc($row[18]);
-	$d2n{$row[0]}="$lcname";
-	$n2d{"$lcname"}=$row[0];
+	$email2eid{"$row[1]"}=$row[0];
+	$eid2email{"$row[0]"}=$row[1];
 }
 
 
@@ -200,7 +196,7 @@ foreach my $email (keys(%employees)){
 					$country = "GB";
 			}
 
-
+#=HERE=
 		#translate the manager's field to his name rather than show dn (too long)
 		if($manager ne 'none'){
 			$manager=$d2n{$manager};

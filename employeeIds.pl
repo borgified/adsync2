@@ -70,7 +70,7 @@ $clear_table->execute or die "SQL Error: $DBI::errstr\n";
 
 my $query = $dbh->prepare("insert into employee_ids (eeid,email,dn) values (?,?,?)");
 
-print "updating employee_ids table with values from $file\n";
+print "creating employee_ids table with values from $file\n";
 
 foreach my $eeid (keys %employees){
 	my $email = lc($employees{$eeid}{'Work Email'});
