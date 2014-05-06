@@ -40,7 +40,15 @@ while(my $fields = $csv->getline($data)){
 	}
 }
 
+unless($csv->eof){
+	$csv->error_diag();
+}
+
+close($data);
+
 #print Dumper(\%employees);exit;
+
+
 
 my $my_cnf = '/secret/my_cnf.cnf';
 
