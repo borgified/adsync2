@@ -254,9 +254,11 @@ foreach my $eid (keys(%employees)){
 			$country = 'GB';
 		}
 
+		my $co = code2country($country);
+
 		if(($country ne $c)||($city ne $physicalDeliveryOfficeName)){
 			$needs_update=$needs_update."L: $employees{$eid}{'Location'},";
-			my $result=$ldap->modify($dn, replace => { c => $country, physicalDeliveryOfficeName => $city});
+			my $result=$ldap->modify($dn, replace => { c => $country, physicalDeliveryOfficeName => $city, co => $co});
 			print $result->error,"\n";
 			$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
 		}
@@ -274,9 +276,11 @@ foreach my $eid (keys(%employees)){
 			$country = 'GB';
 		}
 
+		my $co = code2country($country);
+
 		if(($country ne $c)||($state ne $st)||($city ne $physicalDeliveryOfficeName)){
 			$needs_update=$needs_update."L: $employees{$eid}{'Location'},";
-			my $result=$ldap->modify($dn, replace => { c => $country, st => $state, physicalDeliveryOfficeName => $city});
+			my $result=$ldap->modify($dn, replace => { c => $country, st => $state, physicalDeliveryOfficeName => $city, co => $co});
 			print $result->error,"\n";
 			$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
 		}
