@@ -250,6 +250,8 @@ foreach my $eid (keys(%employees)){
 		#if countrys are not in their 2 letter country code, convert it into one
 		if($country !~ /\b\w\w\b/){
 			$country=uc(country2code($country));
+		}elsif($country eq 'UK'){
+			$country = 'GB';
 		}
 
 		if(($country ne $c)||($city ne $physicalDeliveryOfficeName)){
