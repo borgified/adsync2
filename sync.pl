@@ -7,6 +7,7 @@ use Data::Dumper;
 use DBI;
 use Net::LDAPS;
 use Locale::Country;
+use Encode;
 
 my $file = $ARGV[0] or die "need csv input file\n";
 
@@ -60,7 +61,7 @@ my @header;
 while(my $fields = $csv->getline($data)){
 
 	#detect if the first field starts with 'Employee Name' if so, then this is
-	#our header
+	#our header we'll use it as the key for our hash.
 	my $x=0;
 
 	if(${$fields}[0] eq 'First Name'){
@@ -69,14 +70,15 @@ while(my $fields = $csv->getline($data)){
 	}else{
 
 		foreach my $field (@{$fields}){
-			$employees{lc(${$fields}[-5])}{"$header[$x]"}="$field";
+			#${$fields}[3] is eeid
+			$employees{"${$fields}[3]"}{"$header[$x]"}="$field";
 			$x++;
 		}
 
 	}
 }
 
-print Dumper(\%employees);exit;
+#print Dumper(\%employees);exit;
 
 unless($csv->eof){
 	$csv->error_diag();
@@ -100,260 +102,219 @@ my $dbh = DBI->connect("DBI:mysql:"
 	undef
 ) or die "something went wrong ($DBI::errstr)";
 
-#generate hashes to do email lookups by employee id and vice versa. used for looking up managers mostly.
+$dbh->{'mysql_enable_utf8'} = 1;
+$dbh->do('SET NAMES utf8');
 
-my $q2 = $dbh->prepare("select * from employee_ids");
-$q2->execute;
 
-my %email2eid;
-my %eid2email;
+my $q = $dbh->prepare("select * from employee_ids");
+$q->execute;
 
-while(my @row = $q2->fetchrow_array){
-	$email2eid{"$row[1]"}=$row[0];
-	$eid2email{"$row[0]"}=$row[1];
+my %db;
+
+while(my @row = $q->fetchrow_array){
+	my $a = decode_utf8($row[2]);
+	my $b = encode_utf8($a);
+
+	#$db{dn}=eid
+	$db{$row[0]}=$b;
 }
 
 
-my $query = $dbh->prepare("select * from ldap where mail = ?");
 
-foreach my $email (keys(%employees)){
-	my $rv=$query->execute($email);
-	my($dn,$title,$department,$description,$mail,$sam,$givenName,$sn,$displayname,$company,$c,$st,$physicalDeliveryOfficeName,$telephoneNumber,$facsimileTelephoneNumber,$manager,$l,$upn,$name) = $query->fetchrow_array;
+
+my $query = $dbh->prepare("select * from ldap where eid = ?");
+
+foreach my $eid (keys(%employees)){
+	my $rv=$query->execute($eid);
+	my($dn,$title,$department,$description,$mail,$sam,$givenName,$sn,$displayname,$company,$c,$st,$physicalDeliveryOfficeName,$telephoneNumber,$facsimileTelephoneNumber,$manager,$l,$upn,$name,$eid) = $query->fetchrow_array;
 	if($rv != 1){
-		print "\nI failed to find $email by their email in AD, I will try again by extracting the first name and last name components from $email and repeating the search using first name (givenName) and last name (sn)\u\n";
+		die "\nI failed to find ($eid) in AD. Make sure AD has ($eid) set for ($employees{$eid}->{'Work Email'}) and that the contents of AD are dumped to ldap.ldap using dumpad.pl";
+	}
 
-		#extract givenname and sn from email
-		$email=~/(.*)\.(.*)\@/;
-		my $givenName=$1;
-		my $sn=$2;
-
-		my $search_by_name = $dbh->prepare("select dn,mail from ldap where givenName like \'$givenName\' or sn like \'$sn\'");
-
-		my $rv2=$search_by_name->execute;
-
-		if($rv2 eq '0E0'){
-			print "Sorry, I can't even hazard a guess at who this is: $email\n";
-			print "You should find out who this is manually.\n";
-			print "Just hit <ENTER> to go on to the next employee.\n";
-			<STDIN>;
-		}else{
-
-			print "$rv2 I'm going to take some wild guesses, YOU choose the right one:\n\n";
-			my $x=0;
-			my @choices;
-			while(my ($dn,$mail) = $search_by_name->fetchrow_array()){
-				print $x++." $dn ($mail)\n";
-				push(@choices,$dn);
-			}	
-
-			print "Your answer: ";	
-			my $answer=<STDIN>;
-			#check that the answer is in the valid range
-			print "You chose: $answer\n";<STDIN>;
-		}
-	}else{
-		#using email, we matched an account! compare remaining fields
-
-		print ">>>>$rv $email $dn\n";
-
-		$employees{$email}{"Home Department"} =~ /(.*)\.(.*)/;
-		my $dept = $1;
-		my $desc = $2;
-
-		my @count_dashes = split(//,$employees{$email}{"Location"});
-		my $count=0;
-		foreach my $char (@count_dashes){
-			if($char eq '-'){
-				$count++;
-			}
-		}
-
-		my $country;
-		my $city="";
-		my $state="";
-		my $office_name;
-
-		if($count == 1){
-			$employees{$email}{"Location"} =~ /(.*)-(.*)/;
-			$country = $1;
-			$city = $2;
-			$office_name=$city;
-
-		}elsif($count == 2){
-			$employees{$email}{"Location"} =~ /(.*)-(.*)-(.*)/;
-			$country = $1;
-			$state = $2;
-			$office_name = $3;
-		}else{
-			print "Location field in CSV does not conform to known standard. Investigate IRPT before continuing.\n";
-			exit;
-		}
-
-			#if countrys are not in their 2 letter country code, convert it into one
-			if($country !~ /\b\w\w\b/){
-				$country=uc(country2code($country));
-			}elsif($country eq 'UK'){
-					$country = "GB";
-			}
-
-#=HERE=
-		#translate the manager's field to his name rather than show dn (too long)
-		if($manager ne 'none'){
-			$manager=$d2n{$manager};
-		}
-
-		my $newmanager;
-		#make sure that CSV's manager field resolves to a dn
-		if($employees{$email}{"Manager"} ne ''){
-			$newmanager = $n2d{lc($employees{$email}{"Manager"})};
-			if(!defined($newmanager)){
-				print "i have trouble resolving manager: $employees{$email}{'Manager'} please fix in CSV.\n";
-				exit;
-			}
-		}
-
-		printf " %40s | %40s | %40s \n", "","AD", "CSV";
-		print "-"x120,"-------","\n";
-		printf " %40s | %40s | %40s \n", "displayName:preferred name (niy)", $displayname, $employees{$email}{"Employee Name"};
-		printf " %40s | %40s | %40s \n", "Employee Name", $name, $employees{$email}{"Employee Name"};
-		printf " %40s | %40s | %40s \n", "Job title",$title, $employees{$email}{"Job title"};
-		printf " %40s | %40s | %40s \n", "Business Unit",$company,$employees{$email}{"Business Unit"};
-		print "-"x120,"-------","\n";
-		printf " %40s | %40s | %40s \n", "Home Department","",$employees{$email}{"Home Department"};
-		printf " %40s | %40s | %40s \n", "department",$department, $dept;
-		printf " %40s | %40s | %40s \n", "description",$description, $desc;
-		print "-"x120,"-------","\n";
-		printf " %40s | %40s | %40s \n", "Location","",$employees{$email}{"Location"};
-		printf " %40s | %40s | %40s \n", "c",$c, $country;
-		printf " %40s | %40s | %40s \n", "st",$st, $state;
-		printf " %40s | %40s | %40s \n", "l",$l, $city;
-		printf " %40s | %40s | %40s \n", "physicalDeliveryOfficeName",$physicalDeliveryOfficeName,$office_name;
-		print "-"x120,"-------","\n";
-		printf " %40s | %40s | %40s \n", "Work Phone",$telephoneNumber,$employees{$email}{"Work Phone"};
-		printf " %40s | %40s | %40s \n", "Work Fax",$facsimileTelephoneNumber,$employees{$email}{"Work Fax"};
-		printf " %40s | %40s | %40s \n", "Work Email",$email,$employees{$email}{"Work Email"};
-		printf " %40s | %40s | %40s \n", "Manager (in lowercase)",lc($manager),lc($employees{$email}{"Manager"});
-		print "-"x120,"-------","\n";
-
-		print "\nupdate? (y/n) ";
-		my $input="";
-#		my $input="y";
-		$input=<STDIN>;
-		chomp($input);
-		if(lc($input) eq 'y'){
+	#make sure utf8 gets preserved
+	$dn = encode_utf8(decode_utf8($dn));
+	$title = encode_utf8(decode_utf8($title));
+	$department = encode_utf8(decode_utf8($department));
+	$description = encode_utf8(decode_utf8($description));
+	$givenName = encode_utf8(decode_utf8($givenName));
+	$sn = encode_utf8(decode_utf8($sn));
+	$displayname = encode_utf8(decode_utf8($displayname));
+	$company = encode_utf8(decode_utf8($company));
+	$st = encode_utf8(decode_utf8($st));
+	$physicalDeliveryOfficeName = encode_utf8(decode_utf8($physicalDeliveryOfficeName));
+	$manager = encode_utf8(decode_utf8($manager));
+	$l = encode_utf8(decode_utf8($l));
+	$name = encode_utf8(decode_utf8($name));
 
 
-			my $result=$ldap->modify($dn,
-				replace => {
-					displayname => $employees{$email}{"Employee Name"},
-					title => $employees{$email}{"Job title"},
-					company => $employees{$email}{"Business Unit"},
-					department => $dept,
-					description => $desc,
-					c => $country,
-					physicalDeliveryOfficeName => $office_name,
-					manager => $newmanager,
-				}
-			);
+	#lets check to make sure that all the data from ITRPT for this $eid matches with the current ldap values. if not, update it.
+
+
+#my $result=$ldap->modify($dn,
+#replace => {
+#displayname => $employees{$email}{"Employee Name"},
+#title => $employees{$email}{"Job title"},
+#company => $employees{$email}{"Business Unit"},
+#department => $dept,
+#description => $desc,
+#c => $country,
+#physicalDeliveryOfficeName => $office_name,
+#manager => $newmanager,
+#}
+#);
+#print $result->error,"\n";
+#$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
+
+
+
+
+	my $needs_update="";
+	my $input;
+	#-----------------------------------------
+	if($employees{$eid}{'First Name'} ne $givenName){
+		$needs_update=$needs_update."FN: $employees{$eid}{'First Name'},";
+		my $result=$ldap->modify($dn, replace => { givenName => $employees{$eid}{'First Name'}});
+		print $result->error,"\n";
+		$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
+	}
+	#-----------------------------------------
+	my $pref = $employees{$eid}{'Preferred Name'}." ".$employees{$eid}{'Last Name'};
+
+	if($pref ne $displayname){
+		$needs_update=$needs_update."PN: $pref,";
+		my $result=$ldap->modify($dn, replace => { displayName => $pref});
+		print $result->error,"\n";
+		$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
+	}
+	#-----------------------------------------
+	if($employees{$eid}{'Last Name'} ne $sn){
+		$needs_update=$needs_update."LN: $employees{$eid}{'Last Name'},";
+		my $result=$ldap->modify($dn, replace => { sn => $employees{$eid}{'Last Name'}});
+		print $result->error,"\n";
+		$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
+	}
+	#-----------------------------------------
+	if($employees{$eid}{'Job title'} ne $title){
+		$needs_update=$needs_update."JT: $employees{$eid}{'Job title'},";
+		my $result=$ldap->modify($dn, replace => { title => $employees{$eid}{'Job title'}});
+		print $result->error,"\n";
+		$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
+	}
+	#-----------------------------------------
+	if($employees{$eid}{'Business Unit'} ne $company){
+		$needs_update=$needs_update."BU: $employees{$eid}{'Business Unit'},";
+		my $result=$ldap->modify($dn, replace => { company => $employees{$eid}{'Business Unit'}});
+		print $result->error,"\n";
+		$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
+	}
+	#-----------------------------------------
+	my @count_items = split(/\./,$employees{$eid}{'Home Department'});
+	my $count_items=@count_items;
+
+	if($count_items == 3){
+		$employees{$eid}{'Home Department'} =~ /(.*)\.(.*)/;
+		if(($1 ne $department)||($2 ne $description)){
+			$needs_update=$needs_update."HD: $employees{$eid}{'Home Department'},";
+			my $result=$ldap->modify($dn, replace => { department => $1, description => $2});
 			print $result->error,"\n";
 			$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
+		}
+	}elsif($count_items == 2){
+		if(($employees{$eid}{'Home Department'} ne $department)||($description ne 'none')){
+			$needs_update=$needs_update."HD: $employees{$eid}{'Home Department'},";
+			my $result=$ldap->modify($dn, replace => { department => $employees{$eid}{'Home Department'}});
+			print $result->error,"\n";
+			$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
+			$result=$ldap->modify($dn, delete => [ qw(description) ]);
+			print $result->error,"\n";
+			$result->code && warn "failed to delete entry\n" && $input=<STDIN>;
+		}
+	}else{
+		print "$eid Home Department field in ITRPT is in unknown format (it must have 2 or 3 items): $employees{$eid}{'Home Department'}";
+		exit;
+	}
+	#-----------------------------------------
+	my @count_dashes = split(//,$employees{$eid}{'Location'});
+	my $count=0;
+	foreach my $char (@count_dashes){
+		if($char eq '-'){
+			$count++;
+		}
+	}
 
+	if($count == 1){
+		$employees{$eid}{'Location'} =~ /(.*)-(.*)/;
 
-			#if state is defined, update it
-			if($state ne ''){
-				my $result=$ldap->modify($dn,
-					replace => {
-						st => $state,
-					}
-				);
-				print $result->error,"\n";
-				$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
-			}
-
-			#if city is defined, update it
-			if($city ne ''){
-				my $result=$ldap->modify($dn,
-					replace => {
-						l => $city,
-					}
-				);
-				print $result->error,"\n";
-				$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
-			}
-
-
-			#update phone only if we have that info in CSV and nothing in AD
-			if(($telephoneNumber eq 'none') && ($employees{$email}{"Work Phone"} ne '')){
-				my $result=$ldap->modify($dn,
-					replace => {
-						telephoneNumber => $employees{$email}{"Work Phone"},
-					}
-				);
-				print $result->error,"\n";
-				$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
-			}
-
-			#update fax only if we have that info in CSV and nothing in AD
-			if(($facsimileTelephoneNumber eq 'none') && ($employees{$email}{"Work Fax"} ne '')){
-				my $result=$ldap->modify($dn,
-					replace => {
-						facsimileTelephoneNumber => $employees{$email}{"Work Fax"},
-					}
-				);
-				print $result->error,"\n";
-				$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
-			}
-
-		}else{
-			print "Ok, skipping without making changes.\n";
+		my $country = $1;
+		my $city = $2;
+		#if countrys are not in their 2 letter country code, convert it into one
+		if($country !~ /\b\w\w\b/){
+			$country=uc(country2code($country));
 		}
 
+		if(($country ne $c)||($city ne $physicalDeliveryOfficeName)){
+			$needs_update=$needs_update."L: $employees{$eid}{'Location'},";
+			my $result=$ldap->modify($dn, replace => { c => $country, physicalDeliveryOfficeName => $city});
+			print $result->error,"\n";
+			$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
+		}
 
+	}elsif($count == 2){
+		$employees{$eid}{'Location'} =~ /(.*)-(.*)-(.*)/;
 
-####################################### name
-#		if($name ne $employees{$email}{"Employee Name"}){
-#			print "replacing (name) AD: ".$name." with ITRPT: ".$employees{$email}{"Employee Name"}."\n";
-#			print "proceed? (y/n) ";
-#			my $input="";
-#			$input=<STDIN>;
-#			chomp($input);
-		#
-#			if(lc($input) eq 'y'){
-#				my $result=$ldap->modify($dn,
-#					replace => {
-#						name => $employees{$email}{"Employee Name"},
-#					}
-#				);
-#				print $result->error,"\n";
-#				$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
-#			}else{
-#				print "Ok, skipping without making changes.\n";
-#			}
-#		
-#		}
-####################################### title
-#		if($title ne $employees{$email}{"Job title"}){
-#			print "replacing (title) AD: ".$title." with ITRPT: ".$employees{$email}{"Job title"}."\n";
-#			print "proceed? (y/n) ";
-#			my $input="";
-#			$input=<STDIN>;
-#			chomp($input);
-		#
-#			if(lc($input) eq 'y'){
-#				my $result=$ldap->modify($dn,
-#					replace => {
-#						title => $employees{$email}{"Job title"},
-#					}
-#				);
-#				print $result->error,"\n";
-#				$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
-#			}else{
-#				print "Ok, skipping without making changes.\n";
-#			}
-#		
-#		}
-######################################
+		my $country = $1;
+		my $state = $2;
+		my $city = $3;
+		#if countrys are not in their 2 letter country code, convert it into one
+		if($country !~ /\b\w\w\b/){
+			$country=uc(country2code($country));
+		}
+
+		if(($country ne $c)||($state ne $st)||($city ne $physicalDeliveryOfficeName)){
+			$needs_update=$needs_update."L: $employees{$eid}{'Location'},";
+			my $result=$ldap->modify($dn, replace => { c => $country, st => $state, physicalDeliveryOfficeName => $city});
+			print $result->error,"\n";
+			$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
+		}
+	}else{
+		print "Location field in ITRPT does not conform to known standard. Investigate IRPT before continuing. $eid $employees{$eid}{'Location'}\n";
+		exit;
 	}
+
+# lisa says she hasnt received phone number updates from IT in years so the data in AD is likely
+# to be more up to date than ITRPT
+#	#-----------------------------------------
+#	if(($employees{$eid}{'Work Phone'} ne '') && ($employees{$eid}{'Work Phone'} ne $telephoneNumber)){
+#		$needs_update=$needs_update."WP: $employees{$eid}{'Work Phone'},";
+#	}
+#	#-----------------------------------------
+#	if(($employees{$eid}{'Work Fax'} ne '') && ($employees{$eid}{'Work Fax'} ne $facsimileTelephoneNumber)){
+#		$needs_update=$needs_update."WF: $employees{$eid}{'Work Fax'},";
+#	}
+
+	#-----------------------------------------
+	my $mid = $employees{$eid}{'Manager ID'};
+	if(($employees{$eid}{'Manager ID'} eq '') && ($employees{$eid}{'First Name'} eq 'Steve') && ($employees{$eid}{'Last Name'} eq 'Shine')){
+		#steve shine doesnt have a manager, this is ok
+	}elsif($db{$mid} ne $manager){
+		$needs_update=$needs_update."M: $employees{$eid}{'Manager ID'},";
+		my $result=$ldap->modify($dn, replace => { manager => $db{$mid}});
+		print $result->error,"\n";
+		$result->code && warn "failed to replace entry\n" && $input=<STDIN>;
+	}
+	#-----------------------------------------
+
+
+	if($needs_update ne ''){
+		print "$eid $needs_update\n";
+	}else{
+		print "$eid\n";
+	}
+
+
+
 }
 
 $ldap->unbind;
+
+print "you should now re-run dumpad.pl to pick up all the latest changes to AD before rerunning sync.pl again.\n";
