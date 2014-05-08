@@ -268,6 +268,8 @@ foreach my $eid (keys(%employees)){
 		#if countrys are not in their 2 letter country code, convert it into one
 		if($country !~ /\b\w\w\b/){
 			$country=uc(country2code($country));
+		}elsif($country eq 'UK'){
+			$country = 'GB';
 		}
 
 		if(($country ne $c)||($state ne $st)||($city ne $physicalDeliveryOfficeName)){
@@ -305,10 +307,10 @@ foreach my $eid (keys(%employees)){
 	#-----------------------------------------
 
 
-	if($needs_update ne ''){
-		print "$eid $needs_update\n";
-	}else{
+	if($needs_update eq ''){
 		print "$eid\n";
+	}else{
+		print "$eid $needs_update\n";
 	}
 
 
