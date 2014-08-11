@@ -12,3 +12,7 @@ Optional
 7. run "./sync.pl ITRPT*" to see if there are any remaining items to be synched.
 
 repeat 6, 7 as necessary until no more items need to be synched.
+
+
+
+Please note:  1. Romy Mager-Omphalius prefers to be known as Romy Mager.  She has never had her full name known to the company and 2.  Cynthia Romero Padilla prefers to be known as Cynthia Padilla.  
